@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="pt">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ImoPrime V4 ULTRA</title>
+
+    <!-- React e ReactDOM via CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Leaflet para o mapa -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+
+    <style>
+      body {
+        margin: 0;
+        background: #f3f3f3;
+      }
+      #root {
+        min-height: 100vh;
+      }
+      input {
+        margin-right: 6px;
+        padding: 4px 6px;
+      }
+      button {
+        margin-left: 4px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useEffect, useMemo, useRef, useState } = React;
+
+      const PAGES = {
+        HOME: "home",
+        IMOVEL: "imovel",
+        ADMIN: "admin",
+      };
+
+      // MOCK: backend local em vez de Google Sheets (para funcionar em ficheiro simples)
+      const mockDataInicial = [
+        {
+          id: 1,
+          tipo: "T2 Apartamento",
+          cidade: "Porto",
+          preco: 250000,
+          img: "https://images.pexels.com/photos/259588/pexels-photo-259588.jpeg",
+          lat: 41.1579,
+          lng: -8.6291,
+        },
+        {
+          id: 2,
+          tipo: "Moradia V3",
+          cidade: "Guimarães",
+          preco: 320000,
+          img: "https://images.pexels.com/photos/106399/pexels-photo-106399.jpeg",
+          lat: 41.4444,
+          lng: -8.2962,
+        },
+      ];
+
+      function ImoPrimeImobiliaria() {
+        const [page, setPage] = useState(PAGES.HOME);
+        const [selected, setSelected] = useState(null);
+
+        const [imoveis, setImoveis] = useState(mockDataInicial);
+        const [favoritos, setFavoritos] = useState([]);
+
+        const [filtro, setFiltro] = useState({
+          cidade: "",
+          tipo: "",
+          max: "",
+        });
+
+        const [form, setForm] = useState({
+          tipo: "",
+          cidade: "",
+          preco: "",
+          img: "",
+          lat: "",
+          lng: "",
+        });
+
+        const mapRef = useRef(null);
+
+        const sanitize = (data) => {
+          if (!Array.isArray(data)) return [];
+
+          return data.map((i, index) => ({
+            id: i?.id ?? index,
+            tipo: i?.tipo ?? "",
+            cidade: i?.cidade ?? "",
+            preco: Number(i?.preco ?? 0),
+            img: i?.img || "https://via.placeholder.com/400",
+            lat: Number(i?.lat ?? 0),
+            lng: Number(i?.lng ?? 0),
+          }));
+        };
+
+        // API simulada localmente (sem Google Apps Script)
+        const api = {
+          listar: () => {
+            setImoveis((prev) => sanitize(prev));
+          },
+
+          adicionar: (data) => {
+            setImoveis((prev) =>
+              sanitize([
+                ...prev,
+                { ...data, id: prev.length ? prev[prev.length - 1].id + 1 : 1 },
+              ])
+            );
+          },
+
+          remover: (id) => {
+            setImoveis((prev) => prev.filter((i) => i.id !== id));
+          },
+        };
+
+        useEffect(() => {
+          api.listar();
+        }, []);
+
+        const filtered = useMemo(() => {
+          return (Array.isArray(imoveis) ? imoveis : []).filter((i) => {
+            return (
+              (!filtro.cidade ||
+                i.cidade.toLowerCase().includes(filtro.cidade.toLowerCase())) &&
+              (!filtro.tipo ||
+                i.tipo.toLowerCase().includes(filtro.tipo.toLowerCase())) &&
+              (!filtro.max || i.preco <= Number(filtro.max))
+            );
+          });
+        }, [imoveis, filtro]);
+
+        const toggleFav = (id) => {
+          setFavoritos((prev) =>
+            prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]
+          );
+        };
+
+        const addImovel = () => {
+          api.adicionar({
+            ...form,
+            preco: Number(form.preco || 0),
+            lat: Number(form.lat || 0),
+            lng: Number(form.lng || 0),
+          });
+
+          setForm({
+            tipo: "",
+            cidade: "",
+            preco: "",
+            img: "",
+            lat: "",
+            lng: "",
+          });
+        };
+
+        useEffect(() => {
+          if (!window.L) return;
+
+          if (!mapRef.current) {
+            mapRef.current = window.L.map("map").setView([39.5, -8], 6);
+
+            window.L.tileLayer(
+              "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+              {
+                attribution: "© OpenStreetMap",
+              }
+            ).addTo(mapRef.current);
+          }
+
+          const map = mapRef.current;
+
+          if (map._layer) map.removeLayer(map._layer);
+
+          map._layer = window.L.layerGroup().addTo(map);
+
+          filtered.forEach((i) => {
+            if (i.lat && i.lng) {
+              window.L.marker([i.lat, i.lng]).addTo(map._layer);
+            }
+          });
+        }, [filtered]);
+
+        const openImovel = (i) => {
+          setSelected(i);
+          setPage(PAGES.IMOVEL);
+        };
+
+        if (page === PAGES.IMOVEL && selected) {
+          return (
+            <div style={{ padding: 20 }}>
+              <button onClick={() => setPage(PAGES.HOME)}>← Voltar</button>
+              <h1>{selected.tipo}</h1>
+              <img
+                src={selected.img}
+                style={{ width: "100%", maxWidth: 600 }}
+                alt={selected.tipo}
+              />
+              <p>{selected.cidade}</p>
+              <h2>€ {selected.preco}</h2>
+            </div>
+          );
+        }
+
+        if (page === PAGES.ADMIN) {
+          return (
+            <div style={{ padding: 20 }}>
+              <button onClick={() => setPage(PAGES.HOME)}>← Home</button>
+              <h2>Admin Panel</h2>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 400 }}>
+                <input
+                  placeholder="Tipo"
+                  value={form.tipo}
+                  onChange={(e) =>
+                    setForm({ ...form, tipo: e.target.value })
+                  }
+                />
+                <input
+                  placeholder="Cidade"
+                  value={form.cidade}
+                  onChange={(e) =>
+                    setForm({ ...form, cidade: e.target.value })
+                  }
+                />
+                <input
+                  placeholder="Preço"
+                  value={form.preco}
+                  onChange={(e) =>
+                    setForm({ ...form, preco: e.target.value })
+                  }
+                />
+                <input
+                  placeholder="Imagem (URL)"
+                  value={form.img}
+                  onChange={(e) =>
+                    setForm({ ...form, img: e.target.value })
+                  }
+                />
+                <input
+                  placeholder="Latitude"
+                  value={form.lat}
+                  onChange={(e) =>
+                    setForm({ ...form, lat: e.target.value })
+                  }
+                />
+                <input
+                  placeholder="Longitude"
+                  value={form.lng}
+                  onChange={(e) =>
+                    setForm({ ...form, lng: e.target.value })
+                  }
+                />
+
+                <button onClick={addImovel}>Adicionar</button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div style={{ fontFamily: "Arial" }}>
+            <header
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                padding: 10,
+                background: "#111",
+                color: "white",
+                alignItems: "center",
+              }}
+            >
+              <h2>ImoPrime V4 ULTRA</h2>
+              <div>
+                <button onClick={() => setPage(PAGES.ADMIN)}>Admin</button>
+              </div>
+            </header>
+
+            <div style={{ padding: 10, background: "#fff" }}>
+              <input
+                placeholder="Cidade"
+                onChange={(e) =>
+                  setFiltro({ ...filtro, cidade: e.target.value })
+                }
+              />
+              <input
+                placeholder="Tipologia"
+                onChange={(e) =>
+                  setFiltro({ ...filtro, tipo: e.target.value })
+                }
+              />
+              <input
+                placeholder="Preço max"
+                onChange={(e) =>
+                  setFiltro({ ...filtro, max: e.target.value })
+                }
+              />
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))",
+                gap: 10,
+                padding: 10,
+              }}
+            >
+              {filtered.map((i) => (
+                <div
+                  key={i.id}
+                  style={{
+                    background: "white",
+                    borderRadius: 10,
+                    overflow: "hidden",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                  }}
+                >
+                  <img
+                    src={i.img}
+                    style={{
+                      width: "100%",
+                      height: 150,
+                      objectFit: "cover",
+                    }}
+                    alt={i.tipo}
+                  />
+                  <div style={{ padding: 10 }}>
+                    <h3
+                      onClick={() => openImovel(i)}
+                      style={{ cursor: "pointer", margin: "4px 0" }}
+                    >
+                      {i.tipo}
+                    </h3>
+                    <p style={{ margin: "4px 0" }}>{i.cidade}</p>
+                    <b>€ {i.preco}</b>
+                    <div style={{ marginTop: 6 }}>
+                      <button onClick={() => toggleFav(i.id)}>
+                        {favoritos.includes(i.id) ? "❤️" : "🤍"}
+                      </button>
+                      <button onClick={() => api.remover(i.id)}>Remover</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div
+              id="map"
+              style={{ height: 300, margin: 10, borderRadius: 8, overflow: "hidden" }}
+            ></div>
+          </div>
+        );
+      }
+
+      function testSanitize() {
+        const input = [{ cidade: null, preco: "100" }];
+        const out = input.map((i) => ({
+          cidade: i?.cidade ?? "",
+          preco: Number(i?.preco ?? 0),
+        }));
+        if (out[0].preco !== 100) throw new Error("sanitize falhou");
+        return "OK";
+      }
+
+      function testFav() {
+        let fav = [];
+        const toggle = (id) => {
+          fav = fav.includes(id)
+            ? fav.filter((x) => x !== id)
+            : [...fav, id];
+        };
+        toggle(1);
+        toggle(2);
+        toggle(1);
+        if (fav.length !== 1) throw new Error("fav falhou");
+        return "OK";
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById("root"));
+      root.render(<ImoPrimeImobiliaria />);
+    </script>
+  </body>
+</html>
